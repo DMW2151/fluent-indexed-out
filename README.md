@@ -1,32 +1,19 @@
 # Example: out_gstdout
 
 
-## Build Notes
-
-```bash
-go build -buildmode=c-shared -o ./out/out_gifile.so out_gifile.go
-```
-
 ## Run Notes
-
-### Host
-
-```bash
-bin/fluent-bit -e /path/to/out_gstdout.so -i cpu -o gstdout
-```
 
 ### Container
 
 ```bash
-docker run \
-    -p 127.0.0.1:24224:24224 \
-    -v $(pwd)/out/:/plugins/ \
-    fluent/fluent-bit:1.8 fluent-bit/bin/fluent-bit \
-        -i forward \
-        -o stdout \
-        -e /plugins/out_gstdout.so \
-        -p format=json_lines \
-        -f 1
+# Build
+docker build . --tag dmw2151/fluent-bit-plugins
+
+# Run
+docker run -ti -p 127.0.0.1:24224:24224 \
+	-v $(pwd)/tmp/:/tmp \
+    dmw2151/fluent-bit-plugins:latest \
+    /fluent-bit/bin/fluent-bit -e /plugins/idx/plugin.so -i cpu -o go-indexed-file
 ```
 
 ---------

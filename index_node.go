@@ -10,7 +10,7 @@ import (
 // that can be used as leaf in tree / time-anchorpoint in file
 type Node struct {
 	Offset    int64 `json:"length"`
-	Length    int64 `json:"offset"`
+	Length    int   `json:"offset"`
 	Timestamp int64 `json:"timestamp"`
 }
 

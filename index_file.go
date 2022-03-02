@@ -10,14 +10,14 @@ import (
 
 // FileOptions -
 type FileOptions struct {
-	pageSize int64
+	pageSize int
 }
 
 // IndexedLogFile -
 type IndexedLogFile struct {
-	logfile string
-	index   *btree.BTree
-	options FileOptions
+	indexfile, logfile string
+	index              *btree.BTree
+	options            *FileOptions
 }
 
 // Open -
@@ -41,7 +41,7 @@ func (f *IndexedLogFile) Open(sTime, eTime time.Time) ([]byte, error) {
 		n0 := nodeFromItem(item)
 
 		if n0.Timestamp <= startNode.Timestamp {
-			startNode.Offset = (n0.Offset + n0.Length)
+			startNode.Offset = n0.Offset + int64(n0.Length)
 			return false
 		}
 		return true
@@ -70,7 +70,9 @@ func (f *IndexedLogFile) Open(sTime, eTime time.Time) ([]byte, error) {
 	b, err := syscall.Mmap(
 		int(fi.Fd()),
 		startNode.Offset,
-		int((endNode.Offset+endNode.Length)-startNode.Offset),
+		int(
+			int64(endNode.Offset)+int64(endNode.Length)-startNode.Offset,
+		),
 		syscall.PROT_READ,
 		syscall.MAP_PRIVATE,
 	)

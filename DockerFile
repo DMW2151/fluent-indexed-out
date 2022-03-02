@@ -1,1 +1,18 @@
-FROM fluent/fluent-bit:1.8
+#
+# Comments...
+#
+
+FROM golang:1.16 AS builder
+
+COPY ./ /plugins
+
+# Build Indexed File Plugin
+RUN cd /plugins &&\ 
+    env CGO_ENABLED=1 GOOS=linux go build -buildmode=c-shared \
+        -o /plugins/idx/plugin.so \
+        ./*.go
+
+# Create a builder container – ~900MB vs. ~130MB
+FROM fluent/fluent-bit:1.8.12
+
+COPY --from=builder /plugins /plugins
