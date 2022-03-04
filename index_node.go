@@ -1,4 +1,4 @@
-package main
+package indexedLogPlugin
 
 import (
 	"encoding/json"
@@ -10,7 +10,7 @@ import (
 // that can be used as leaf in tree / time-anchorpoint in file
 type Node struct {
 	Offset    int64 `json:"length"`
-	Length    int   `json:"offset"`
+	Length    int32 `json:"offset"`
 	Timestamp int64 `json:"timestamp"`
 }
 

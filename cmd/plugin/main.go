@@ -14,11 +14,31 @@ import (
 	"io"
 	"os"
 
-	"github.com/google/btree"
+	fio "github.com/dmw2151/fluent-indexed-out"
 )
 
 //
-const pageSize int = 1 * 1024 * 32
+const (
+	pageSize     int32 = 1 * 1024 * 4
+	nodesPerFile       = 4
+)
+
+var (
+	opt = fio.LogFileOptions{
+		PageSize:  pageSize,
+		Root:      `/tmp`,
+		TreeDepth: 2,
+	}
+
+	cw      = &fio.CounterWr{}
+	encoder = json.NewEncoder(cw)
+	logFile = fio.NewLogFile(&opt)
+)
+
+// roundToFloorMultiple
+func roundToFloorMultiple(n int64, m int) int64 {
+	return (n / int64(m)) * int64(m)
+}
 
 //export FLBPluginRegister
 func FLBPluginRegister(def unsafe.Pointer) int {
@@ -45,32 +65,23 @@ func FLBPluginFlush(data unsafe.Pointer, length C.int, tag *C.char) int {
 	// Create Fluent Bit decoder
 	dec := output.NewDecoder(data, int(length))
 
-	// Create Logfile
-	fi, _ := os.OpenFile("/tmp/file.json", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	fi, _ := os.OpenFile(
+		fmt.Sprintf("%s/%s.log", logFile.Options.Root, logFile.FID),
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644,
+	)
 	defer fi.Close()
 
+	// Seek End...no clue where might be...
 	fi.Seek(0, io.SeekEnd)
 
-	// Create LogFile Writer
-	cw := &CounterWr{Writer: fi}
-	encoder := json.NewEncoder(cw)
-
-	// Create Node File
-	f := IndexedLogFile{
-		index:     btree.New(2),
-		logfile:   fi.Name(),
-		indexfile: "node-001.idx",
-		options: &FileOptions{
-			pageSize: pageSize,
-		},
-	}
+	cw.Writer = fi
 
 	for {
 		// Extract Record
 		// See: https://github.com/fluent/fluent-bit-go/blob/7785f07f38f4c6ec1dd139c7ee0fa89af92187f9/output/decoder.go#L71
 		ret, ts, records := output.GetRecord(dec)
 
-		// Unexpectedly - Critical Line Here...
+		// Unexpectedly, this is a critical line...
 		if ret != 0 {
 			break
 		}
@@ -89,8 +100,8 @@ func FLBPluginFlush(data unsafe.Pointer, length C.int, tag *C.char) int {
 		// new entry to logfile...
 		for k, v := range records {
 
-			// Write
-			err := encoder.Encode(&Record{
+			// Write JSON...
+			err := encoder.Encode(&fio.Record{
 				Timestamp: timestamp.String(),
 				Tag:       C.GoString(tag),
 				Key:       k,
@@ -102,8 +113,11 @@ func FLBPluginFlush(data unsafe.Pointer, length C.int, tag *C.char) int {
 				fmt.Println(err)
 			}
 
+			// BUG: What do we do if there aren't many records!? this increases the delay
+			// to hit the index!!
+			//
 			// Write Node Breakpoint iff the total bytes written crosses K * pageSize...
-			if cw.CurBytesWritten > f.options.pageSize {
+			if cw.CurBytesWritten > int(logFile.Options.PageSize) {
 
 				// Add Node w the following properties. These ensure that all nodes'
 				// offsets can be Seek'd too and all nodes will end on a clean line
@@ -113,19 +127,41 @@ func FLBPluginFlush(data unsafe.Pointer, length C.int, tag *C.char) int {
 				// 	- Length as any int64...
 				stdByteOffset := roundToFloorMultiple(
 					cw.Offset+cw.BytesWritten,
-					f.options.pageSize,
+					int(logFile.Options.PageSize),
 				)
 
-				f.index.ReplaceOrInsert(&Node{
+				// BUG: Careful!! In the event that a single timestamp (UnixNano)
+				// takes up more than one full node (e.g. 16kB, 128kB, etc...), the
+				// subsequent writes will replace the earlier...
+				logFile.Index.ReplaceOrInsert(&fio.Node{
 					Offset: stdByteOffset,
-					Length: int(
+					Length: int32(
 						(cw.Offset + cw.BytesWritten) - stdByteOffset,
 					),
-					Timestamp: timestamp.Unix(),
+					Timestamp: timestamp.UnixNano(),
 				})
 
 				// Reset the bytesWritten to the Node to 0!
 				cw.CurBytesWritten = 0
+				logFile.Flush(true)
+
+				// Check that we are not starting a new overflowing node group...
+				if logFile.Index.Len() > (nodesPerFile - 1) {
+
+					// Rotate
+					logFile.Rotate()
+
+					// Open logfile generated from logFile.Rotate()...
+					fi, _ := os.OpenFile(
+						fmt.Sprintf("%s/%s.log", logFile.Options.Root, logFile.FID),
+						os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644,
+					)
+					defer fi.Close()
+
+					cw.Writer = fi
+
+				}
+
 			}
 		}
 	}

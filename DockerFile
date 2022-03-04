@@ -10,7 +10,7 @@ COPY ./ /plugins
 RUN cd /plugins &&\ 
     env CGO_ENABLED=1 GOOS=linux go build -buildmode=c-shared \
         -o /plugins/idx/plugin.so \
-        ./*.go
+        ./index_file.go ./index_node.go ./counterwriter.go ./record.go ./main.go
 
 # Create a builder container – ~900MB vs. ~130MB
 FROM fluent/fluent-bit:1.8.12
