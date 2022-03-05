@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const nodesPerFile = 4
+const nodesPerFile = 1024
 
 // LogFileOptions - Options passed to `IndexedLogFile` to define index
 // writing patterns
@@ -26,9 +26,10 @@ type LogFileOptions struct {
 // IndexedLogFile - Manages the fileTree, uses all incoming log events to
 // update the time-indexed btree, `index`
 type IndexedLogFile struct {
-	FID     uuid.UUID
-	Index   *btree.BTree
-	Options *LogFileOptions
+	FID            uuid.UUID
+	Index          *btree.BTree
+	Options        *LogFileOptions
+	Lbound, Ubound int64
 }
 
 // SerializedIndex - Summarizes an `IndexedLogFile` w. the bounds and nodes of
@@ -36,7 +37,7 @@ type IndexedLogFile struct {
 type SerializedIndex struct {
 
 	// Lbound, Ubound - Upper and Lower Bound of the File...
-	Lbound, Ubound int64
+	BoundLow, BoundHigh int64
 
 	// Nodes - All nodes in the `IndexedLogFile` tree...
 	Nodes [nodesPerFile]Node
@@ -61,6 +62,7 @@ func NewLogFile(opt *LogFileOptions) *IndexedLogFile {
 		Index:   btree.New(2),
 		FID:     fID,
 		Options: opt,
+		Ubound:  time.Now().UnixNano(),
 	}
 	return &indexedFile
 }
@@ -68,8 +70,15 @@ func NewLogFile(opt *LogFileOptions) *IndexedLogFile {
 // Rotate - Rotate IndexedLogFile - in this context, `Rotate`, just means replace
 // the UUID and generate a new file-tree
 func (f *IndexedLogFile) Rotate() {
+
+	// Reset the UUID and btree...
 	f.FID = uuid.New()
 	f.Index = btree.New(f.Options.TreeDepth)
+
+	// Rotate the time bounds s.t. this file's bounds directly follow the
+	// bounds of the old file...
+	f.Lbound = f.Ubound
+	f.Ubound = time.Now().UnixNano()
 }
 
 // Flush - serialize and write the current `IndexedLogFile` tree to the tail
@@ -81,17 +90,17 @@ func (f *IndexedLogFile) Flush(firstWrite bool) error {
 		// index, structSize - index object with a fixed size (indexSize) - will
 		// be serialized to disk
 		index = SerializedIndex{
-			Lbound: nodeFromItem(f.Index.Min()).Timestamp,
-			Ubound: nodeFromItem(f.Index.Max()).Timestamp,
+			BoundLow:  nodeFromItem(f.Index.Min()).Timestamp,
+			BoundHigh: nodeFromItem(f.Index.Max()).Timestamp,
 		}
-		indexSize = binary.Size(index)
 
+		activeNodes = make([]Node, f.Index.Len())
 		// i, nodeDumpIter - Iterate over the nodes in the current tree w.
 		// nodeDumpIter, write to the serialized
 		i            = 0
 		nodeDumpIter = func(item btree.Item) bool {
 			n0 := nodeFromItem(item)
-			index.Nodes[i] = n0
+			activeNodes[i] = n0
 			i++
 			return true
 		}
@@ -101,11 +110,7 @@ func (f *IndexedLogFile) Flush(firstWrite bool) error {
 	)
 
 	// Add UUID to SerializedIndex
-	b, err := f.FID.MarshalBinary()
-	if err != nil {
-		return err
-	}
-	copy(index.FID[:], b)
+	copy(index.FID[:], f.FID[:])
 
 	// Add Nodes to SerializedIndex
 	f.Index.Ascend(nodeDumpIter)
@@ -117,11 +122,13 @@ func (f *IndexedLogFile) Flush(firstWrite bool) error {
 	)
 	defer fi.Close()
 
-	// Seek to the end of the file & grab the length
-
-	// On first write, where there is no content to mmap & modify, seek to end
-	// and write the index
+	// On first write, where there is no content to mmap & modify...
 	if firstWrite {
+
+		// Add activeNodes into index.Nodes...
+		copy(index.Nodes[:], activeNodes)
+
+		// Write to file...
 		_, _ = fi.Seek(0, io.SeekEnd)
 		err := binary.Write(fi, binary.BigEndian, index)
 		return err
@@ -149,14 +156,29 @@ func (f *IndexedLogFile) Flush(firstWrite bool) error {
 		return err
 	}
 
-	// TODO/BUG: This can be much faster using an unsafePtr (?) - might not
-	// matter much though...
-	binary.Write(&bwr, binary.BigEndian, index)
+	// Replace Upper Bound && Nodes: The names of the fields dictate
+	// the order of the bytes in the struct! careful!
+	//
+	// Recall: We have the following format given the defn of
+	// `SerializedIndex`
+	// {
+	//	 1646453905411859000  - BoundHigh
+	//	 1646453905202542000  - BoundLow
+	//	 [{4096 4096 1646453905202542000} {0 0 0} {0 0 0} {0 0 0}]  - Nodes
+	//	 [251 115 87 119 103 114 74 38 159 20 94 38 210 161 122 165] - UUID
+	// }
 
-	copy(
-		mmap[(int(indexLen)-indexSize):],
-		bwr.Bytes(),
+	// BoundHigh occupies [offset, offset + 8]
+	binary.BigEndian.PutUint64(
+		mmap[:9], uint64(index.BoundHigh),
 	)
+
+	// Nodes occupy [offset + 17, offset + 17 + (nodesPerFile * nodeSize)]
+	// nodeSize == 20 Bytes
+	//	- Offset, Timestamp == 8 ea.
+	// 	- Length == 4
+	_ = binary.Write(&bwr, binary.BigEndian, activeNodes)
+	copy(mmap[16:], bwr.Bytes())
 
 	return nil
 
@@ -180,7 +202,6 @@ func (f *IndexedLogFile) ReadIndex(numIndexes int) (ic []*IndexCollection) {
 	// i.e. How many times has the file been rotated?
 	l, _ := fi.Seek(0, io.SeekEnd)
 	nBlocks := int(l) / structSize
-	fmt.Println(l, nBlocks)
 
 	// Seek `numIndexes`
 	_, _ = fi.Seek(
