@@ -43,7 +43,7 @@ type SerializedIndex struct {
 
 	// fID - A UUID representing the location of the `IndexedLogFile`'s actual
 	// entries. This index references the entries in `${ROOT}/${UUID}.log`
-	fID [16]byte
+	FID [16]byte
 }
 
 // IndexCollection - A collection of `IndexedLogFile` objects
@@ -105,7 +105,7 @@ func (f *IndexedLogFile) Flush(firstWrite bool) error {
 	if err != nil {
 		return err
 	}
-	copy(index.fID[:], b)
+	copy(index.FID[:], b)
 
 	// Add Nodes to SerializedIndex
 	f.Index.Ascend(nodeDumpIter)
@@ -152,6 +152,7 @@ func (f *IndexedLogFile) Flush(firstWrite bool) error {
 	// TODO/BUG: This can be much faster using an unsafePtr (?) - might not
 	// matter much though...
 	binary.Write(&bwr, binary.BigEndian, index)
+
 	copy(
 		mmap[(int(indexLen)-indexSize):],
 		bwr.Bytes(),
@@ -162,31 +163,36 @@ func (f *IndexedLogFile) Flush(firstWrite bool) error {
 }
 
 // ReadIndex -
-func (f *IndexedLogFile) ReadIndex(lastNBlocks int) (ic []*IndexCollection) {
+func (f *IndexedLogFile) ReadIndex(numIndexes int) (ic []*IndexCollection) {
 
 	var (
 		index      SerializedIndex
 		structSize int = binary.Size(index)
 	)
 
+	// Open the index from disk...
 	fi, _ := os.Open(
 		fmt.Sprintf(`%s/fluent-index`, f.Options.Root),
 	)
 	defer fi.Close()
 
+	// Calculate the number of distinct file indexes there are
+	// i.e. How many times has the file been rotated?
 	l, _ := fi.Seek(0, io.SeekEnd)
 	nBlocks := int(l) / structSize
+	fmt.Println(l, nBlocks)
 
-	pos, _ := fi.Seek(
-		-1*int64(lastNBlocks*structSize), io.SeekEnd,
+	// Seek `numIndexes`
+	_, _ = fi.Seek(
+		-1*int64(numIndexes*structSize), io.SeekEnd,
 	)
 
-	// Read the last `lastNBlocks`
-	for r := (nBlocks - lastNBlocks); r < nBlocks; r++ {
-		fmt.Println(
-			fmt.Sprintf(`%d, %v`, pos, index),
-		)
+	// Read the last `numIndexes`
+	for r := (nBlocks - numIndexes); r < nBlocks; r++ {
 		_ = binary.Read(fi, binary.BigEndian, &index)
+		fmt.Println(
+			fmt.Sprintf(`%d, %v`, r, index),
+		)
 	}
 	return
 

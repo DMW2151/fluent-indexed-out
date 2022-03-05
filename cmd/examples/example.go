@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"time"
 
 	fio "github.com/dmw2151/fluent-indexed-out"
@@ -23,7 +24,7 @@ var (
 
 func main() {
 
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 3; i++ {
 
 		h.Rotate()
 
@@ -35,8 +36,12 @@ func main() {
 				Timestamp: time.Now().UnixNano(),
 			})
 
-			h.Flush(j == 0)
+			err := h.Flush(j == 0)
+			if err != nil {
+				fmt.Println(err)
+			}
+
 		}
 	}
-	//h.ReadIndex(1)
+	h.ReadIndex(3)
 }
