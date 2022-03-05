@@ -19,15 +19,15 @@ import (
 
 //
 const (
-	pageSize     int32 = 1 * 1024 * 4
+	bytesPerNode int32 = 1 * 1024 * 4
 	nodesPerFile       = 4
 )
 
 var (
 	opt = fio.LogFileOptions{
-		PageSize:  pageSize,
-		Root:      `/tmp`,
-		TreeDepth: 2,
+		BytesPerNode: bytesPerNode,
+		Root:         `/tmp`,
+		TreeDepth:    2,
 	}
 
 	cw      = &fio.CounterWr{}
@@ -116,18 +116,18 @@ func FLBPluginFlush(data unsafe.Pointer, length C.int, tag *C.char) int {
 			// BUG: What do we do if there aren't many records!? this increases the delay
 			// to hit the index!!
 			//
-			// Write Node Breakpoint iff the total bytes written crosses K * pageSize...
-			if cw.CurBytesWritten > int(logFile.Options.PageSize) {
+			// Write Node Breakpoint iff the total bytes written crosses K * bytesPerNode...
+			if cw.CurBytesWritten > int(logFile.Options.BytesPerNode) {
 
 				// Add Node w the following properties. These ensure that all nodes'
 				// offsets can be Seek'd too and all nodes will end on a clean line
 				// break
 				//
-				// 	- Offset as a multiple of pagesize
+				// 	- Offset as a multiple of bytesPerNode
 				// 	- Length as any int64...
 				stdByteOffset := roundToFloorMultiple(
 					cw.Offset+cw.BytesWritten,
-					int(logFile.Options.PageSize),
+					int(logFile.Options.BytesPerNode),
 				)
 
 				// BUG: Careful!! In the event that a single timestamp (UnixNano)

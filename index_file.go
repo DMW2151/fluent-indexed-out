@@ -1,7 +1,6 @@
 package indexedLogPlugin
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -13,14 +12,14 @@ import (
 	"github.com/google/uuid"
 )
 
-const nodesPerFile = 1024
+const nodesPerFile = 4
 
 // LogFileOptions - Options passed to `IndexedLogFile` to define index
 // writing patterns
 type LogFileOptions struct {
-	PageSize  int32
-	Root      string
-	TreeDepth int
+	BytesPerNode int32
+	Root         string
+	TreeDepth    int
 }
 
 // IndexedLogFile - Manages the fileTree, uses all incoming log events to
@@ -62,23 +61,16 @@ func NewLogFile(opt *LogFileOptions) *IndexedLogFile {
 		Index:   btree.New(2),
 		FID:     fID,
 		Options: opt,
-		Ubound:  time.Now().UnixNano(),
 	}
 	return &indexedFile
 }
 
 // Rotate - Rotate IndexedLogFile - in this context, `Rotate`, just means replace
 // the UUID and generate a new file-tree
+// Reset the UUID and btree...
 func (f *IndexedLogFile) Rotate() {
-
-	// Reset the UUID and btree...
 	f.FID = uuid.New()
 	f.Index = btree.New(f.Options.TreeDepth)
-
-	// Rotate the time bounds s.t. this file's bounds directly follow the
-	// bounds of the old file...
-	f.Lbound = f.Ubound
-	f.Ubound = time.Now().UnixNano()
 }
 
 // Flush - serialize and write the current `IndexedLogFile` tree to the tail
@@ -104,16 +96,14 @@ func (f *IndexedLogFile) Flush(firstWrite bool) error {
 			i++
 			return true
 		}
-
-		// bwr -  Intermediate buffer between mmap and tree
-		bwr bytes.Buffer
 	)
 
 	// Add UUID to SerializedIndex
 	copy(index.FID[:], f.FID[:])
 
-	// Add Nodes to SerializedIndex
+	// Add activeNodes into index.Nodes...
 	f.Index.Ascend(nodeDumpIter)
+	copy(index.Nodes[:], activeNodes)
 
 	// Open the index-file for reading | writing ...
 	fi, _ := os.OpenFile(
@@ -122,65 +112,20 @@ func (f *IndexedLogFile) Flush(firstWrite bool) error {
 	)
 	defer fi.Close()
 
-	// On first write, where there is no content to mmap & modify...
+	// Write to file...
 	if firstWrite {
+		fi.Seek(0, io.SeekEnd)
+	} else {
+		pos, _ := fi.Seek(
+			-int64(binary.Size(index)), io.SeekEnd,
+		)
 
-		// Add activeNodes into index.Nodes...
-		copy(index.Nodes[:], activeNodes)
-
-		// Write to file...
-		_, _ = fi.Seek(0, io.SeekEnd)
-		err := binary.Write(fi, binary.BigEndian, index)
-		return err
+		fi.Truncate(pos)
 	}
 
-	// On subsequent writes, mmap the last linux page of the file and modify the
-	// last `SerializedIndex`. For example: In a 12288 byte file, given page sizes
-	// of 4096 and an indexSize of 200, read [8192, 12888], modify [12688, 12888]
+	err := binary.Write(fi, binary.BigEndian, index)
 
-	// Get indexLen s.t. we can offset into a valid value...
-	indexLen, _ := fi.Seek(0, io.SeekEnd)
-
-	// MMap the section of the file described above
-	// BUG: Ensure the bounds for this section are correct!
-	mmap, err := syscall.Mmap(
-		int(fi.Fd()),
-		0,
-		int(indexLen),
-		syscall.PROT_WRITE|syscall.PROT_READ,
-		syscall.MAP_SHARED,
-	)
-	defer syscall.Munmap(mmap)
-
-	if err != nil {
-		return err
-	}
-
-	// Replace Upper Bound && Nodes: The names of the fields dictate
-	// the order of the bytes in the struct! careful!
-	//
-	// Recall: We have the following format given the defn of
-	// `SerializedIndex`
-	// {
-	//	 1646453905411859000  - BoundHigh
-	//	 1646453905202542000  - BoundLow
-	//	 [{4096 4096 1646453905202542000} {0 0 0} {0 0 0} {0 0 0}]  - Nodes
-	//	 [251 115 87 119 103 114 74 38 159 20 94 38 210 161 122 165] - UUID
-	// }
-
-	// BoundHigh occupies [offset, offset + 8]
-	binary.BigEndian.PutUint64(
-		mmap[:9], uint64(index.BoundHigh),
-	)
-
-	// Nodes occupy [offset + 17, offset + 17 + (nodesPerFile * nodeSize)]
-	// nodeSize == 20 Bytes
-	//	- Offset, Timestamp == 8 ea.
-	// 	- Length == 4
-	_ = binary.Write(&bwr, binary.BigEndian, activeNodes)
-	copy(mmap[16:], bwr.Bytes())
-
-	return nil
+	return err
 
 }
 
@@ -225,14 +170,14 @@ func (f *IndexedLogFile) OpenBetween(sTime, eTime time.Time) ([]byte, error) {
 	// startNode - Used for Setting Lower Bound
 	var startNode = Node{
 		Timestamp: sTime.Unix(),
-		Length:    f.Options.PageSize,
+		Length:    f.Options.BytesPerNode,
 		Offset:    0,
 	}
 
 	// EndNode - Used for Setting Upper Bound
 	var endNode = Node{
 		Timestamp: eTime.Unix(),
-		Length:    f.Options.PageSize,
+		Length:    f.Options.BytesPerNode,
 	}
 
 	// descIterFunc -

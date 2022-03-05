@@ -8,17 +8,18 @@ import (
 )
 
 const (
-	pageSize int32 = 1 * 1024 * 32
+	bytesPerNode int32 = 1 * 1024 * 32
 )
 
 var (
 	opt = fio.LogFileOptions{
-		PageSize:  pageSize,
-		Root:      `./tmp`,
-		TreeDepth: 2,
+		BytesPerNode: bytesPerNode,
+		Root:         `./tmp`,
+		TreeDepth:    2,
 	}
 
-	h *fio.IndexedLogFile = fio.NewLogFile(&opt)
+	h   *fio.IndexedLogFile = fio.NewLogFile(&opt)
+	err error
 )
 
 // Tests to consider
@@ -28,6 +29,8 @@ var (
 // Performance on 1-node tree
 // Performance on 1024 tree
 // Performance on 8192 tree
+// MultiFlush...
+// Add more nodes than file stated capacity??
 
 func main() {
 
@@ -35,7 +38,7 @@ func main() {
 
 		h.Rotate()
 
-		for j := 0; j < 2; j++ {
+		for j := 0; j < 1; j++ {
 
 			// Fill tree to some fraction of capacity...
 			for n := 0; n < 512; n++ {
@@ -46,12 +49,13 @@ func main() {
 				})
 			}
 
-			fmt.Println(time.Now().UnixNano())
-			for k := 0; k < 100; k++ {
-				h.Flush(j == 0)
+			err = h.Flush(j == 0)
+			if err != nil {
+				fmt.Println(err)
 			}
-			fmt.Println(time.Now().UnixNano())
 
 		}
 	}
+
+	h.ReadIndex(1)
 }
