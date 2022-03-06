@@ -17,10 +17,10 @@ import (
 	fio "github.com/dmw2151/fluent-indexed-out"
 )
 
-//
+// Const...
 const (
-	bytesPerNode int32 = 1 * 1024 * 4
-	nodesPerFile       = 4
+	bytesPerNode int64 = 1 * 1024 * 32
+	nodesPerFile       = 1024
 )
 
 var (
@@ -32,7 +32,7 @@ var (
 
 	cw      = &fio.CounterWr{}
 	encoder = json.NewEncoder(cw)
-	logFile = fio.NewLogFile(&opt)
+	logFile = fio.NewIndex(&opt)
 )
 
 // roundToFloorMultiple
@@ -102,7 +102,7 @@ func FLBPluginFlush(data unsafe.Pointer, length C.int, tag *C.char) int {
 
 			// Write JSON...
 			err := encoder.Encode(&fio.Record{
-				Timestamp: timestamp.String(),
+				Timestamp: timestamp.UTC(),
 				Tag:       C.GoString(tag),
 				Key:       k,
 				Value:     v,
@@ -130,9 +130,8 @@ func FLBPluginFlush(data unsafe.Pointer, length C.int, tag *C.char) int {
 					int(logFile.Options.BytesPerNode),
 				)
 
-				// BUG: Careful!! In the event that a single timestamp (UnixNano)
-				// takes up more than one full node (e.g. 16kB, 128kB, etc...), the
-				// subsequent writes will replace the earlier...
+				// BUG: Consider putting an increasing jitter here to ensure no duplicate
+				// node writes...
 				logFile.Index.ReplaceOrInsert(&fio.Node{
 					Offset: stdByteOffset,
 					Length: int32(
@@ -143,7 +142,7 @@ func FLBPluginFlush(data unsafe.Pointer, length C.int, tag *C.char) int {
 
 				// Reset the bytesWritten to the Node to 0!
 				cw.CurBytesWritten = 0
-				logFile.Flush(true)
+				logFile.Flush()
 
 				// Check that we are not starting a new overflowing node group...
 				if logFile.Index.Len() > (nodesPerFile - 1) {

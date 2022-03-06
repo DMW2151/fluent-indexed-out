@@ -1,6 +1,8 @@
-package indexedLogPlugin
+package indexedlogplugin
 
-import "io"
+import (
+	"io"
+)
 
 // CounterWr - https://stackoverflow.com/a/37704940
 type CounterWr struct {
@@ -9,6 +11,7 @@ type CounterWr struct {
 	CurBytesWritten      int
 }
 
+// Write -
 func (cw *CounterWr) Write(p []byte) (n int, err error) {
 	n, err = cw.Writer.Write(p)
 	cw.BytesWritten += int64(n)

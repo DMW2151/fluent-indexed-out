@@ -1,9 +1,11 @@
-package indexedLogPlugin
+package indexedlogplugin
 
-// Record - ...
+import "time"
+
+// Record -
 type Record struct {
-	Timestamp string
-	Tag       string
-	Key       interface{}
-	Value     interface{}
+	Timestamp time.Time   `json:"Timestamp"`
+	Tag       string      `json:"Tag"`
+	Key       interface{} `json:"Key"`
+	Value     interface{} `json:"Value"`
 }

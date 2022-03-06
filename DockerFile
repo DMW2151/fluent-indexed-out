@@ -4,11 +4,13 @@
 
 FROM golang:1.16 AS builder
 
-COPY ./cmd/plugins /plugins
+WORKDIR ./src/github.com/dmw2151/out_indexed_log
+
+COPY ./ ./
 
 # Build Indexed File Plugin
-RUN cd /plugins &&\ 
-    env CGO_ENABLED=1 GOOS=linux go build -buildmode=c-shared \
+RUN cd ./cmd/plugins &&\ 
+    env CGO_ENABLED=1 go build -buildmode=c-shared \
         -o /plugins/idx/plugin.so \
         ./main.go
 
