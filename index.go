@@ -1,7 +1,6 @@
 package indexedlogplugin
 
 import (
-	"encoding/binary"
 	"fmt"
 	"os"
 	"syscall"
@@ -10,12 +9,19 @@ import (
 	"github.com/google/uuid"
 )
 
+// These are true facts about UUID and Node
+const (
+	NODESIZE int64 = 20
+	UUIDSIZE int64 = 16
+)
+
 // IndexedLogFile - Manages the fileTree, uses all incoming log events to
 // update the time-indexed btree, `index`
 type IndexedLogFile struct {
-	FID     uuid.UUID
-	Index   *btree.BTree
-	Options *LogFileOptions
+	FID           uuid.UUID
+	Index         *btree.BTree
+	Options       *LogFileOptions
+	nNodesFlushed int
 }
 
 // NewIndex - Create IndexedLogFile
@@ -28,26 +34,6 @@ func NewIndex(opt *LogFileOptions) *IndexedLogFile {
 		Options: opt,
 	}
 	return &indexedFile
-}
-
-// NewIndexFromFile -
-func NewIndexFromFile(fileID uuid.UUID, opt *LogFileOptions) *IndexedLogFile {
-
-	var serIndex SerializedIndex
-
-	// Open the index from disk...
-	fi, _ := os.Open(
-		fmt.Sprintf(`%s/%s.idx`, opt.Root, fileID),
-	)
-	defer fi.Close()
-
-	err := binary.Read(fi, binary.BigEndian, &serIndex)
-	if err != nil {
-		// Handle
-	}
-
-	idxF := serIndex.Deserialize(opt)
-	return &idxF
 }
 
 // Rotate - Rotate IndexedLogFile - in this context, `Rotate`, just means replace
@@ -63,10 +49,7 @@ func (f *IndexedLogFile) Serialize() *SerializedIndex {
 	var (
 		// index, structSize - index object with a fixed size (indexSize) - will
 		// be serialized to disk
-		index = SerializedIndex{
-			Lbound: nodeFromItem(f.Index.Min()).Timestamp,
-			Ubound: nodeFromItem(f.Index.Max()).Timestamp,
-		}
+		index = SerializedIndex{}
 
 		activeNodes = make([]Node, f.Index.Len())
 		// i, nodeDumpIter - Iterate over the nodes in the current tree w.
@@ -92,15 +75,20 @@ func (f *IndexedLogFile) Serialize() *SerializedIndex {
 
 // Flush - serialize and write the current `IndexedLogFile` tree to the tail
 // of the index file on disk...
-func (f *IndexedLogFile) Flush() error {
+func (f *IndexedLogFile) Flush() (n int, err error) {
+
+	var (
+		nodeOffset  int64 = int64(f.nNodesFlushed) * NODESIZE
+		nodeByteCap int64 = (NODESIZE * int64(f.Index.Len())) - nodeOffset
+	)
 
 	// Serialize
-	index := f.Serialize()
+	serIndex := f.Serialize()
 
 	// Open the index-file for reading | writing ...
 	fi, _ := os.OpenFile(
 		fmt.Sprintf(`%s/%s.idx`, f.Options.Root, f.FID),
-		os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644,
+		os.O_CREATE|os.O_RDWR, 0644,
 	)
 
 	defer func() {
@@ -108,13 +96,27 @@ func (f *IndexedLogFile) Flush() error {
 		fi.Close()
 	}()
 
-	// Write whole index to file...
-	err := binary.Write(fi, binary.BigEndian, index)
+	// Conservative write on first Flush(), write all nodes, mostly {0, [...0]}
+	if f.nNodesFlushed == 0 {
+		n, _ = fi.WriteAt(serIndex.SafeBytes(), 0)
+		f.nNodesFlushed = f.Index.Len()
+		return
+	}
 
-	return err
+	// WARN: On subsequent writes - Use fi.WriteAt, index only to updated nodes
+	// NodeSafeBytes() is conservative in that it uses buffered IO, i.e. SLOW!
+	n, err = fi.WriteAt(
+		serIndex.NodeSafeBytes()[nodeOffset:(nodeOffset+nodeByteCap)],
+		UUIDSIZE+nodeOffset,
+	)
+
+	// Update flushed nodes count..
+	f.nNodesFlushed = f.Index.Len()
+
+	return
 }
 
-// FirstLTEHead
+// FirstLTEHead -
 func (f *IndexedLogFile) FirstLTEHead(t int64) (offset int64) {
 
 	// Starting from startNode - descend 1 node...
@@ -172,14 +174,15 @@ func (f *IndexedLogFile) FirstGTETail(t int64) (offset int64) {
 	return endNode.Offset + int64(endNode.Length)
 }
 
-// OpenBetween -
+// OpenBetweenPositions -
 func (f *IndexedLogFile) OpenBetweenPositions(offset int64, until int64) ([]byte, error) {
 
 	var ps = int64(os.Getpagesize())
 
 	// Open logfile as O_RDONLY...
 	fi, err := os.OpenFile(
-		fmt.Sprintf(`%s/%s.log`, f.Options.Root, f.FID), os.O_RDONLY, 0644,
+		fmt.Sprintf(`%s/%s.log`, f.Options.Root, f.FID),
+		os.O_RDONLY, 0644,
 	)
 	if err != nil {
 		fmt.Println(err)

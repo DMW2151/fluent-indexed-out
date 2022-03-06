@@ -19,13 +19,13 @@ import (
 
 // Const...
 const (
-	bytesPerNode int64 = 1 * 1024 * 32
-	nodesPerFile       = 1024
+	BYTESPERNODE int64 = 1 * 1024 * 32
+	NODESPERFILE       = 4096
 )
 
 var (
 	opt = fio.LogFileOptions{
-		BytesPerNode: bytesPerNode,
+		BytesPerNode: BYTESPERNODE,
 		Root:         `/tmp`,
 		TreeDepth:    2,
 	}
@@ -145,7 +145,7 @@ func FLBPluginFlush(data unsafe.Pointer, length C.int, tag *C.char) int {
 				logFile.Flush()
 
 				// Check that we are not starting a new overflowing node group...
-				if logFile.Index.Len() > (nodesPerFile - 1) {
+				if logFile.Index.Len() > (NODESPERFILE - 1) {
 
 					// Rotate
 					logFile.Rotate()

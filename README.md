@@ -25,6 +25,16 @@ docker buildx build --platform \
     --push .
 ```
 
+
+```bash
+# No Linux/arm/v6 fluent-bit:1.8.12 image, rather than building from source or downgrading
+# build go on the RPI0 host...
+
+env CGO_ENABLED=1 go build -buildmode=c-shared \
+    -o /plugins/idx/plugin.so \
+    ./main.go
+```
+
 ## Fluent Plugin Structure
 
 See original documentation from the Go Fluent plugin [repo](https://github.com/fluent/fluent-bit-go) for detailed explaination of the plugin callbacks.
