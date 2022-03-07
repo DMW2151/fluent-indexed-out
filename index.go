@@ -43,6 +43,11 @@ func (f *IndexedLogFile) Rotate() {
 	f.Index = btree.New(f.Options.TreeDepth)
 }
 
+// Path -
+func (f *IndexedLogFile) Path() string {
+	return fmt.Sprintf(`%v/%v.idx`, f.Options.Root, f.FID)
+}
+
 // Serialize -
 func (f *IndexedLogFile) Serialize() *SerializedIndex {
 
@@ -204,9 +209,6 @@ func (f *IndexedLogFile) OpenBetweenPositions(offset int64, until int64) ([]byte
 	if err != nil {
 		return []byte{}, err
 	}
-
-	// Filter to exact location
-	// TBD...
 
 	return mmap, nil
 }

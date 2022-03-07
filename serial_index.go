@@ -3,14 +3,12 @@ package indexedlogplugin
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"os"
 
 	"github.com/google/btree"
-	"github.com/google/uuid"
 )
 
-const NODESPERFILE = 256
+const NODESPERFILE = 4096
 
 // SerializedIndex - Summarizes an `IndexedLogFile` w. the bounds and nodes of
 // represented as  fixed length types. Easily writeable/readable as binary...
@@ -55,12 +53,11 @@ func (sI *SerializedIndex) NodeSafeBytes() []byte {
 }
 
 // ReadSerializedIndex -
-func ReadSerializedIndex(fileID uuid.UUID, opt *LogFileOptions) (serIndex SerializedIndex, err error) {
+func ReadSerializedIndex(path string) (serIndex SerializedIndex, err error) {
 
 	// Open the index file from disk && read whole contents
-	fi, err := os.Open(
-		fmt.Sprintf(`%s/%s.idx`, opt.Root, fileID),
-	)
+	fi, err := os.Open(path)
+
 	if err != nil {
 		return serIndex, err
 	}

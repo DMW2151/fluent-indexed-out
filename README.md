@@ -9,7 +9,7 @@ docker build . --tag dmw2151/fluent-bit-plugins
 # Run
 docker run -ti \
     -p 127.0.0.1:24224:24224 \
-    -v $(pwd)/tmp/:/tmp \
+    -v $(pwd)/cmd/examples/tmp/:/tmp \
     dmw2151/fluent-bit-plugins:latest \
     /fluent-bit/bin/fluent-bit -e /plugins/idx/plugin.so -i cpu -o go-indexed-file
 ```

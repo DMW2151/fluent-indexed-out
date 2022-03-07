@@ -68,7 +68,7 @@ func main() {
 	}
 
 	// Restore from ./tmp/${UUID}.idx
-	serIndex, err := fio.ReadSerializedIndex(idxF.FID, &opt)
+	serIndex, err := fio.ReadSerializedIndex(idxF.Path())
 	if err != nil {
 		fmt.Println(err)
 	}
