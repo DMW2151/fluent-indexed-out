@@ -21,7 +21,7 @@ import (
 )
 
 var defaultOptions = fio.LogFileOptions{
-	Root:      `../examples/tmp`,
+	Root:      `/tmp`,
 	TreeDepth: 2,
 }
 
@@ -163,7 +163,6 @@ func Query(w http.ResponseWriter, r *http.Request) {
 		Time:   time.Now(),
 		Body:   resp,
 	})
-
 }
 
 // handleQueryOp

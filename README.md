@@ -25,14 +25,18 @@ docker buildx build --platform \
     --push .
 ```
 
-
 ```bash
 # No Linux/arm/v6 fluent-bit:1.8.12 image, rather than building from source or downgrading
 # build go on the RPI0 host...
-
 env CGO_ENABLED=1 go build -buildmode=c-shared \
-    -o /plugins/idx/plugin.so \
+    -o /home/pi/plugins/idx/plugin.so \
     ./main.go
+
+# And then run with Fluent on the Host...
+/opt/td-agent-bit/bin/td-agent-bit \
+    -e /home/pi/plugins/idx/plugin.so \
+    -i mem \
+    -o go-indexed-file
 ```
 
 ## Fluent Plugin Structure
